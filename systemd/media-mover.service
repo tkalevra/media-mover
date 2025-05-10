@@ -1,0 +1,17 @@
+[Unit]
+Description=Media Mover Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/media-mover-venv/bin/python /opt/media-mover.py
+WorkingDirectory=/opt/
+Restart=on-failure
+User=root
+Group=family
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
