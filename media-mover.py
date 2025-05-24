@@ -1,105 +1,79 @@
 import os
-import re
-import requests
-import logging
 import shutil
-import sys
+import logging
 import configparser
+import requests
+import sys
 
-# Load configuration
-CONFIG_FILE = '/opt/media-mover/media-mover.conf'
+# Load Configuration
 config = configparser.ConfigParser()
-config.read(CONFIG_FILE)
+config.read('/opt/media-mover/media-mover.conf')
 
-# Configuration
-UPLOADS_DIR = config.get('Paths', 'uploads_dir', fallback='/mnt/uploads')
-LOG_FILE = config.get('Paths', 'log_file', fallback='/var/log/media-mover.log')
-OMDB_API_KEY = config.get('OMDb', 'api_key', fallback='4b7c2635')
-OMDB_API_URL = config.get('OMDb', 'api_url', fallback='http://www.omdbapi.com/')
+UPLOADS_DIR = config.get('Paths', 'uploads_dir')
+LOG_FILE = config.get('Paths', 'log_file')
+TV_DIR = config.get('Paths', 'tv_dir')
+MOVIES_DIR = config.get('Paths', 'movies_dir')
+MOVIES_KIDS_DIR = config.get('Paths', 'movies_kids_dir')
+MUSIC_DIR = config.get('Paths', 'music_dir')
+UNKNOWN_DIR = config.get('Paths', 'unknown_dir')
+OMDB_API_KEY = config.get('OMDb', 'api_key')
+OMDB_API_URL = config.get('OMDb', 'api_url')
 
-# Set up logging
-logging.basicConfig(
-    filename=LOG_FILE,
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Logging Configuration (file + journal)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-# Regex patterns for media identification
-TV_PATTERN = re.compile(r'(S\d{2}E\d{2}|Season \d+)', re.IGNORECASE)
-MOVIE_PATTERN = re.compile(r'\.(mkv|mp4|avi|mov)$', re.IGNORECASE)
-MUSIC_PATTERN = re.compile(r'\.(mp3|flac|wav)$', re.IGNORECASE)
+file_handler = logging.FileHandler(LOG_FILE)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(file_handler)
 
-# Target directories
-DEST_DIRS = {
-    'TV': config.get('Paths', 'tv_dir'),
-    'MOVIES': config.get('Paths', 'movies_dir'),
-    'MOVIES-KIDS': config.get('Paths', 'movies_kids_dir'),
-    'MUSIC': config.get('Paths', 'music_dir'),
-    'UNKNOWN': config.get('Paths', 'unknown_dir')
-}
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(stream_handler)
 
-# Ensure required directories exist
-for key, path in DEST_DIRS.items():
-    if key in ['TV', 'MOVIES', 'MOVIES-KIDS', 'MUSIC']:
-        if not os.path.exists(path):
-            logging.error(f"Critical Error: Directory {path} does not exist. Exiting.")
-            sys.exit(1)
-    else:
-        os.makedirs(path, exist_ok=True)
+def is_tv_show(name):
+    return "S" in name and "E" in name
 
-# Dry-run flag
-DRY_RUN = '--dry-run' in sys.argv
+def is_movie(name):
+    return name.lower().endswith(('.mkv', '.mp4', '.avi', '.mov'))
 
-# Function to query OMDb API for media details
-def query_omdb(title):
-    try:
-        response = requests.get(OMDB_API_URL, params={'t': title, 'apikey': OMDB_API_KEY})
-        if response.status_code == 200:
-            return response.json()
-    except Exception as e:
-        logging.error(f"OMDb API Error: {str(e)}")
-    return None
+def classify_and_move(item_path):
+    item_name = os.path.basename(item_path)
 
-# Function to classify media and format names
-def classify_media(file_name):
-    if TV_PATTERN.search(file_name):
-        return 'TV'
-    elif MUSIC_PATTERN.search(file_name):
-        return 'MUSIC'
-    elif MOVIE_PATTERN.search(file_name):
-        return 'MOVIES'
-    return 'UNKNOWN'
+    if os.path.isdir(item_path):
+        if is_tv_show(item_name):
+            destination = os.path.join(TV_DIR, item_name)
+        elif is_movie(item_name):
+            destination = os.path.join(MOVIES_DIR, item_name)
+        else:
+            destination = os.path.join(UNKNOWN_DIR, item_name)
 
-# Function to move and rename files
-def move_and_rename(file_path, category):
-    file_name = os.path.basename(file_path)
-    new_name = file_name.replace(' ', '.').replace('1080p', '1080p').replace('720p', '720p')
+        try:
+            if not os.path.exists(destination):
+                shutil.move(item_path, destination)
+                logging.info(f"Moved directory: {item_path} -> {destination}")
+            else:
+                logging.info(f"Skipped (already exists): {item_path}")
+        except Exception as e:
+            logging.error(f"Failed to move directory: {item_path} -> {destination} - Error: {str(e)}")
 
-    if category in DEST_DIRS:
-        new_path = os.path.join(DEST_DIRS[category], new_name)
-    else:
-        new_path = os.path.join(DEST_DIRS['UNKNOWN'], new_name)
+    elif os.path.isfile(item_path):
+        logging.info(f"Skipped file (not a directory): {item_path}")
 
-    if DRY_RUN:
-        logging.info(f"[DRY-RUN] Would move: {file_path} -> {new_path}")
+def main():
+    logging.info("Media Mover started.")
+    if not os.path.exists(UPLOADS_DIR):
+        logging.error(f"Uploads directory does not exist: {UPLOADS_DIR}")
         return
 
-    if not os.path.exists(new_path):
-        shutil.move(file_path, new_path)
-        logging.info(f"Moved: {file_path} -> {new_path}")
-    else:
-        logging.warning(f"Skipped (exists): {new_path}")
+    ignored_dirs = {'partial', 'UNKNOWN'}
+    for item in os.listdir(UPLOADS_DIR):
+        if item in ignored_dirs:
+            logging.info(f"Ignored directory: {item}")
+            continue
+        item_path = os.path.join(UPLOADS_DIR, item)
+        classify_and_move(item_path)
 
-# Main function
-def scan_uploads():
-    for root, dirs, files in os.walk(UPLOADS_DIR):
-        # Exclude UNKNOWN directory
-        dirs[:] = [d for d in dirs if d != 'UNKNOWN']
-        for file in files:
-            file_path = os.path.join(root, file)
-            category = classify_media(file)
-            move_and_rename(file_path, category)
-
-if __name__ == '__main__':
-    scan_uploads()
+if __name__ == "__main__":
+    main()
 
