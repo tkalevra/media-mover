@@ -1,0 +1,13 @@
+# Core requirements
+requests
+xxhash
+configparser
+guessit>=3.4.3
+
+# Optional: if using inotify-based file watching
+pyinotify
+
+# Optional: Levenshtein-based fuzzy matching
+python-Levenshtein
+
+guessit>=3.4.3

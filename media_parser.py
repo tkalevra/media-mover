@@ -1,47 +1,46 @@
-import re
+from guessit import guessit
 from typing import Optional, Tuple, Dict
 from unicodedata import normalize
+import re
+
+# --- Primary Regex for TV Episode Matching ---
+TV_PATTERN = re.compile(
+    r'(?P<title>.+?)[.\s_\-\[\(]*[Ss](?P<season>\d{1,2})[Ee](?P<episode>\d{2})(?:[-E]?(?P<end_episode>\d{2}))?[\]\).\s_\-]*',
+    re.IGNORECASE
+)
 
 def sanitize_name(text: str) -> str:
-    """Convert to ASCII, remove special chars, and normalize spacing."""
+    """Convert to ASCII, remove special chars, normalize spacing."""
     text = normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
     text = re.sub(r'[^\w\s-]', '', text).strip()
     return re.sub(r'[._-]+', ' ', text).strip()
 
 def parse_media_title(raw_name: str) -> Tuple[str, Optional[str]]:
-    """Extract clean title and optional year from a raw filename."""
+    """Extract clean title and optional year using guessit."""
     try:
-        clean_name = re.sub(
-            r'\.(mkv|mp4|avi|mov|iso|zip|rar|r\d{1,3}|v\d{1,3})$', '', raw_name, flags=re.IGNORECASE
-        )
-
-        year_match = re.search(
-            r'(?:^|\D)(\d{4})(?:\D|$)|\((\d{4})\)|\.(\d{4})\.', clean_name
-        )
-        year = next((y for y in year_match.groups() if y), None) if year_match else None
-
-        title = re.sub(r'\(.*?\)|\[.*?\]|\d{3,4}p|\.\d{4}\.|[._-]+$', '', clean_name)
-        title = re.sub(r'[._-]+', ' ', title).strip()
-
-        return title, year
+        guess = guessit(raw_name)
+        title = guess.get('title')
+        year = guess.get('year')
+        return title, str(year) if year else None
     except Exception:
         return raw_name, None
 
 def is_tv_show(name: str) -> bool:
-    """Detect typical TV episode patterns."""
+    """Detect common TV show patterns in filename."""
     return bool(re.search(
-        r'S\d{1,2}E\d{1,2}(?:-E?\d{1,2})?|Season[._ ]?\d{1,2}[._ ]?Episode[._ ]?\d{1,2}',
+        r'[Ss]\d{1,2}[Ee]\d{1,2}(?:[-E]?\d{1,2})?|Season[._ ]?\d{1,2}[._ ]?Episode[._ ]?\d{1,2}',
         name, re.IGNORECASE
     ))
 
 def get_tv_show_info(name: str) -> Optional[Dict[str, str]]:
-    """Extract season/episode from filename."""
-    match = re.search(r'S(\d{1,2})E(\d{1,2})(?:-E?(\d{1,2}))?', name, re.IGNORECASE)
+    """Extract season, episode, and optional range from filename."""
+    match = TV_PATTERN.search(name)
     if match:
         return {
-            "season": match.group(1).zfill(2),
-            "episode": match.group(2).zfill(2),
-            "end_episode": match.group(3).zfill(2) if match.group(3) else None
+            "title": sanitize_name(match.group("title")),
+            "season": match.group("season").zfill(2),
+            "episode": match.group("episode").zfill(2),
+            "end_episode": match.group("end_episode").zfill(2) if match.group("end_episode") else None
         }
     return None
 
